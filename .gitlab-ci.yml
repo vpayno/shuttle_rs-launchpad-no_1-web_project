@@ -1,0 +1,128 @@
+---
+#
+# .gitlab-ci.yml
+#
+stages:
+  - test
+  - build
+  - publish
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main" || ($CI_PIPELINE_SOURCE == 'merge_request_event' && ( $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main" || $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "master" ))
+
+variables:
+  RUST_BACKTRACE: "FULL"
+
+cache:  # Setup a cache to cache job parts between jobs to ensure faster builds
+  key: "$CI_JOB_NAME"
+  untracked: true
+  paths:
+    - $HOME/.cargo/
+    - target/
+
+tests-and-coverage:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - rustc --version && cargo --version
+    - apt update
+    - apt install -y lcov  # --install-suggests
+    - cargo install --locked cargo-llvm-cov
+    - cargo llvm-cov clean --workspace
+    - cargo build
+    - cargo test --verbose
+    - cargo llvm-cov --no-clean
+    - cargo llvm-cov report --cobertura --output-path coverage.xml
+    - cargo llvm-cov report --lcov --output-path lcov.info
+    - lcov --list lcov.info
+    - lcov --summary lcov.info |& tee coverage.txt
+  coverage: '/.*lines......: (\d+\.\d+)%.*$/'
+  artifacts:
+    name: ${CI_JOB_NAME}-${CI_COMMIT_REF_NAME}-${CI_COMMIT_SHA}
+    when: always
+    expire_in: 2 weeks
+    paths:
+      - coverage.txt
+      - coverage.xml
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+
+lint-code:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - rustup component add clippy
+    - cargo clippy --future-incompat-report -- -D warnings
+
+audit-code:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - cargo install --locked cargo-audit
+    - cargo audit
+
+format-code:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - rustup component add rustfmt
+    - cargo fmt -- --check
+
+spellcheck:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - apt update
+    - apt install -y llvm clang clang libclang-dev build-essential libssl-dev
+    - LIBCLANG_PATH="$(llvm-config --prefix)/lib" cargo install --locked cargo-spellcheck
+    - cargo spellcheck check
+
+outdated:
+  stage: test
+  image: rust
+  allow_failure: true
+  script:
+    - cargo install --locked cargo-outdated
+    - cargo outdated
+
+build:amd64:
+  stage: build
+  image: rust
+  script:
+    - cargo build --release
+  artifacts:
+    paths:
+      - target/release/web-project
+
+rustdoc:
+  stage: build
+  image: rust
+  script:
+    - cargo doc
+  artifacts:
+    paths:
+      - target/doc
+
+pages:
+  stage: publish
+  image: alpine
+  dependencies:
+    - build:amd64
+    - rustdoc
+  script:
+    - mkdir -pv public
+    - mv -v target/doc public/doc
+    - mv -v target/release/web-project
+  artifacts:
+    paths:
+      - public
+  only:
+    - master
