@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = "0.6.20"
+axum = "0.7.5"
 shuttle-axum = "0.25.0"
 shuttle-runtime = "0.25.0"
 tokio = { version = "1.35.1", features = ["full"] }
